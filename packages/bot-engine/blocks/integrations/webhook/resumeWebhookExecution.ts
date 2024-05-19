@@ -11,6 +11,7 @@ import { SessionState } from '@typebot.io/schemas/features/chat/sessionState'
 import { ExecuteIntegrationResponse } from '../../../types'
 import { parseVariables } from '@typebot.io/variables/parseVariables'
 import { updateVariablesInSession } from '@typebot.io/variables/updateVariablesInSession'
+import vm from 'vm'
 
 type Props = {
   state: SessionState
@@ -55,22 +56,29 @@ export const resumeWebhookExecution = ({
     if (!varMapping?.bodyPath || !varMapping.variableId) return newVariables
     const existingVariable = typebot.variables.find(byId(varMapping.variableId))
     if (!existingVariable) return newVariables
-    const func = Function(
-      'data',
-      `return data.${parseVariables(typebot.variables)(varMapping?.bodyPath)}`
-    )
+    const sandbox = vm.createContext({
+      data: response.data,
+    })
     try {
-      const value: unknown = func(response)
+      const value: unknown = vm.runInContext(
+        parseVariables(typebot.variables)(varMapping?.bodyPath),
+        sandbox
+      )
       return [...newVariables, { ...existingVariable, value }]
     } catch (err) {
       return newVariables
     }
   }, [])
   if (newVariables && newVariables.length > 0) {
-    const newSessionState = updateVariablesInSession(state)(newVariables)
+    const { updatedState, newSetVariableHistory } = updateVariablesInSession({
+      newVariables,
+      state,
+      currentBlockId: block.id,
+    })
     return {
       outgoingEdgeId: block.outgoingEdgeId,
-      newSessionState,
+      newSessionState: updatedState,
+      newSetVariableHistory,
       logs,
     }
   }
